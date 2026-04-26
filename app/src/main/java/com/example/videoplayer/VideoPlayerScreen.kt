@@ -101,9 +101,10 @@ class VideoPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    fun setMediaUri(Uri: Uri) {
-        _videoUri.value = Uri
-        val mediaItem = MediaItem.fromUri(Uri)
+    fun setMediaUri(uri: Uri) {
+        _videoUri.value = uri
+        val mediaItem = MediaItem.fromUri(uri)
+
         _player.value?.apply {
             setMediaItem(mediaItem)
             prepare()
@@ -146,21 +147,31 @@ class VideoPlayerViewModel(application: Application) : AndroidViewModel(applicat
         playerListener?.let { _player.value?.removeListener(it) }
         _player.value?.release()
     }
+
 }
 
 @Composable
 fun MediaPlayerScreen(
     viewModel: VideoPlayerViewModel,
+    externalVideoUri: Uri?, // renamed (important)
     windowInsetsController: WindowInsetsControllerCompat,
     window: Window
 ) {
-    val videoUri by viewModel.videoUri.collectAsState()
+
+    val vmVideoUri by viewModel.videoUri.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
 
     val pickVideoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
         onResult = { uri: Uri? -> uri?.let { viewModel.setMediaUri(it) } }
     )
+
+    // Load external video automatically
+    LaunchedEffect(externalVideoUri) {
+        externalVideoUri?.let {
+            viewModel.setMediaUri(it)
+        }
+    }
 
     var controlsVisible by remember { mutableStateOf(true) }
 
@@ -174,18 +185,24 @@ fun MediaPlayerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
-        contentAlignment = Alignment.Center
+            .background(Color.Black)
     ) {
-        if (videoUri != null) {
+        if (vmVideoUri != null) {
             VideoPlayer(viewModel)
         } else {
             WelcomeMessage { pickVideoLauncher.launch("video/*") }
         }
 
-        if (videoUri != null) {
-            GestureControls(viewModel, window) { controlsVisible = !controlsVisible }
-            CustomControls(viewModel, windowInsetsController, controlsVisible)
+        if (vmVideoUri != null) {
+            GestureControls(viewModel, window) {
+                controlsVisible = !controlsVisible
+            }
+
+            CustomControls(
+                viewModel,
+                windowInsetsController,
+                controlsVisible
+            )
         }
     }
 }
@@ -224,7 +241,7 @@ fun WelcomeMessage(onOpenFile: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
-        modifier = Modifier.padding(16.dp)
+        modifier = Modifier.fillMaxSize().padding(16.dp)
     ) {
         Icon(
             imageVector = Icons.Default.Movie,
@@ -299,7 +316,7 @@ fun CustomControls(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(formatDuration(currentTime), color = Color.White, fontSize = 14.sp, modifier = Modifier.width(50.dp))
+                        Text(formatDuration(currentTime), color = Color.White, fontSize = 14.sp)
 
                         var sliderPosition by remember(currentTime) { mutableStateOf(currentTime.toFloat()) }
 
@@ -325,7 +342,7 @@ fun CustomControls(
                                 inactiveTrackColor = Color.Gray
                             )
                         )
-                        Text(formatDuration(totalDuration), color = Color.White, fontSize = 14.sp, modifier = Modifier.width(50.dp).padding(start = 8.dp))
+                        Text(formatDuration(totalDuration), color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(start = 8.dp))
                     }
 
                     Row(
@@ -374,9 +391,16 @@ fun CustomControls(
 
 private fun formatDuration(ms: Long): String {
     if (ms < 0) return "00:00"
-    val minutes = TimeUnit.MILLISECONDS.toMinutes(ms)
-    val seconds = TimeUnit.MILLISECONDS.toSeconds(ms) - TimeUnit.MINUTES.toSeconds(minutes)
-    return String.format("%02d:%02d", minutes, seconds)
+
+    val hours = TimeUnit.MILLISECONDS.toHours(ms)
+    val minutes = TimeUnit.MILLISECONDS.toMinutes(ms) % 60
+    val seconds = TimeUnit.MILLISECONDS.toSeconds(ms) % 60
+
+    return if (hours > 0) {
+        String.format("%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format("%02d:%02d", minutes, seconds)
+    }
 }
 
 private enum class GestureType { NONE, VOLUME, BRIGHTNESS }
